@@ -97,9 +97,23 @@ rule shortcut_params:
         """
 
 
-rule start_query:
+rule modify_query_params:
     input:
         "{proj_name}/{case_uuid}/query_params.json",
+    output:
+        "{proj_name}/{case_uuid}/query_params_adjusted.json",
+    run:
+        with open(input[0], "rt") as inputf:
+            query_params = json.load(inputf)
+        if config["genes"]:
+            query_params["query_settings"]["gene_allowlist"] = config["genes"]
+        with open(output[0], "wt") as outputf:
+            json.dump(query_params, outputf, indent="  ")
+
+
+rule start_query:
+    input:
+        "{proj_name}/{case_uuid}/query_params_adjusted.json",
     output:
         "{proj_name}/{case_uuid}/query.json",
     wildcard_constraints:

@@ -10,6 +10,7 @@
 !config/*.example
 !LICENSE
 !README.md
+!CHANGELOG.md
 !.gitignore
 !.gitattributes
 !.editorconfig
