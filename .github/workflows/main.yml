@@ -1,0 +1,33 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+
+jobs:
+  Formatting:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Formatting
+        uses: github/super-linter@v4
+        env:
+          VALIDATE_ALL_CODEBASE: false
+          DEFAULT_BRANCH: main
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VALIDATE_SNAKEMAKE_SNAKEFMT: true
+
+  Linting:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Lint workflow
+      uses: snakemake/snakemake-github-action@v1.24.0
+      with:
+        directory: .
+        snakefile: workflow/Snakefile
+        stagein: "mamba install -y -n snakemake --channel conda-forge pyarrow=6.0"
+        args: "--lint"

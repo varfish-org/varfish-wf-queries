@@ -1,0 +1,8 @@
+from snakemake.utils import min_version
+
+
+min_version("7.3.0")
+
+
+rule default:
+    input: []
