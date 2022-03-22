@@ -7,7 +7,7 @@
 !workflow/rules/*
 !workflow/rules/annotation/*
 !workflow/resources/*
-!config/*
+!config/*.example
 !LICENSE
 !README.md
 !.gitignore

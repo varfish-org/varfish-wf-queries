@@ -1,8 +1,198 @@
+import json
+
 from snakemake.utils import min_version
 
 
 min_version("7.3.0")
 
 
+HEADER = (
+    "RELEASE",
+    "CHROM",
+    "POS",
+    "REF",
+    "ALT",
+    "EFFECT",
+    "GENE",
+    "TRANSCRIPT",
+    "SAMPLE1",
+    "SAMPLE1_GT",
+    "SAMPLE1_ALT_COV",
+    "SAMPLE1_TOTAL_COV",
+    "SAMPLE1_GT_QUAL",
+    "SAMPLE2",
+    "SAMPLE2_GT",
+    "SAMPLE2_ALT_COV",
+    "SAMPLE2_TOTAL_COV",
+    "SAMPLE2_GT_QUAL",
+    "SAMPLE3",
+    "SAMPLE3_GT",
+    "SAMPLE3_ALT_COV",
+    "SAMPLE3_TOTAL_COV",
+    "SAMPLE3_GT_QUAL",
+)
+
+
+configfile: "config/main.yml"
+
+
 rule default:
-    input: []
+    input:
+        [f"{proj['name']}/joined_result.tsv" for proj in config["varfish_projects"]],
+
+
+def finish_project_input(wildcards):
+    with checkpoints.list_cases.get(proj_name=wildcards.proj_name).output[
+        0
+    ].open() as inputf:
+        cases = json.load(inputf)
+    result = []
+    for case in cases:
+        case_sodar_uuid = case["sodar_uuid"]
+        result.append(f"{wildcards.proj_name}/{case_sodar_uuid}/query_result.tsv")
+    return result
+
+
+rule finish_project_input:
+    input:
+        finish_project_input,
+    output:
+        tsv="{proj_name}/joined_result.tsv",
+    run:
+        with open(output.tsv, "wt") as outputf:
+            print("\t".join(HEADER), file=outputf)
+            for input_file in input:
+                with open(input_file, "rt") as inputf:
+                    outputf.write(inputf.read())
+
+
+checkpoint list_cases:
+    output:
+        "{proj_name}/cases.json",
+    wildcard_constraints:
+        proj_name=r"[a-zA-Z0-9_-]+",
+    run:
+        proj_uuid = [proj["uuid"] for proj in config["varfish_projects"]][0]
+        shell(
+            r"""
+        mkdir -p $(dirname {output})
+        varfish-cli case --output-format=json list d5b5f971-91ec-4f56-ad41-9e48b6e91e2b \
+        > {output}
+        """
+        )
+
+
+rule shortcut_params:
+    output:
+        "{proj_name}/{case_uuid}/query_params.json",
+    wildcard_constraints:
+        proj_name=r"[a-zA-Z0-9_-]+",
+    shell:
+        r"""
+        varfish-cli case --output-format=json \
+            small-var-query-shortcut \
+            {wildcards.case_uuid} \
+            {config[varfish_shortcuts][query_presets]} \
+        > {output}
+        """
+
+
+rule start_query:
+    input:
+        "{proj_name}/{case_uuid}/query_params.json",
+    output:
+        "{proj_name}/{case_uuid}/query.json",
+    wildcard_constraints:
+        proj_name=r"[a-zA-Z0-9_-]+",
+    shell:
+        r"""
+        varfish-cli case --output-format=json \
+            small-var-query-create \
+            {wildcards.case_uuid} \
+            @{input} \
+        > {output}
+        """
+
+
+rule wait_for_query:
+    input:
+        "{proj_name}/{case_uuid}/query.json",
+    output:
+        "{proj_name}/{case_uuid}/query_status.json",
+    wildcard_constraints:
+        proj_name=r"[a-zA-Z0-9_-]+",
+    shell:
+        r"""
+        query_id=$(jq -r '.sodar_uuid' {input})
+
+        while true; do
+            varfish-cli case --output-format=json \
+                small-var-query-status \
+                "$query_id" \
+            > {output}.tmp
+
+            if grep done {output}.tmp >/dev/null; then
+                mv {output}.tmp {output}
+                break
+            fi
+            sleep 10s
+        done
+        """
+
+
+rule fetch_results_json:
+    input:
+        query="{proj_name}/{case_uuid}/query.json",
+        query_status="{proj_name}/{case_uuid}/query_status.json",
+    output:
+        "{proj_name}/{case_uuid}/query_result.json",
+    wildcard_constraints:
+        proj_name=r"[a-zA-Z0-9_-]+",
+    shell:
+        r"""
+        set -x
+        query_id=$(jq -r '.sodar_uuid' {input.query})
+
+        varfish-cli case --output-format=json \
+            small-var-query-fetch-results \
+            "$query_id" \
+        > {output}
+        """
+
+
+def do_convert(inputf, outputf):
+    data = json.load(inputf)
+    for row in data:
+        arr = [
+            row["release"],
+            "chr%s" % row["chromosome"],
+            row["start"],
+            row["reference"],
+            row["alternative"],
+            "|".join(row["refseq_effect"]),
+            row["refseq_gene_id"],
+            row["refseq_transcript_id"],
+        ]
+        for sample, gt in row["genotype"].items():
+            arr += [
+                sample.replace("-N1-DNA1-WES1", ""),
+                gt["gt"],
+                gt["ad"],
+                gt["dp"],
+                gt["gq"],
+            ]
+        arr = list(map(str, arr))
+        print("\t".join(arr), file=outputf)
+
+
+rule convert_results_tsv:
+    input:
+        "{proj_name}/{case_uuid}/query_result.json",
+    output:
+        "{proj_name}/{case_uuid}/query_result.tsv",
+    wildcard_constraints:
+        proj_name=r"[a-zA-Z0-9_-]+",
+    run:
+        with open(input[0], "rt") as inputf:
+            with open(output[0], "wt") as outputf:
+                do_convert(inputf, outputf)
