@@ -1,6 +1,19 @@
+import os.path
+import gzip
 import json
 
 from snakemake.utils import min_version
+
+
+#: Path from entrez to symbol mapping.
+PATH_ENTREZ_MAPPING = srcdir("../data/entrez_to_symbol.tsv.gz")
+
+#: Load entrez to symbol mapping.
+ENTREZ_TO_SYMBOL = {}
+with gzip.open(PATH_ENTREZ_MAPPING, "rt") as inputf:
+    for line in inputf:
+        arr = line.strip().split("\t")
+        ENTREZ_TO_SYMBOL[arr[0]] = arr[1]
 
 
 min_version("7.3.0")
@@ -13,7 +26,8 @@ HEADER = (
     "REF",
     "ALT",
     "EFFECT",
-    "GENE",
+    "GENE_SYMBOL",
+    "GENE_ENTREZID",
     "TRANSCRIPT",
     "SAMPLE1",
     "SAMPLE1_GT",
@@ -50,6 +64,9 @@ def finish_project_input(wildcards):
     for case in cases:
         case_sodar_uuid = case["sodar_uuid"]
         result.append(f"{wildcards.proj_name}/{case_sodar_uuid}/query_result.tsv")
+    result = list(sorted(result))
+    if config.get("max_cases") and len(cases) >= int(config["max_cases"]):
+        result = result[: int(config["max_cases"])]
     return result
 
 
@@ -76,7 +93,7 @@ checkpoint list_cases:
         shell(
             r"""
         mkdir -p $(dirname {output})
-        varfish-cli case --output-format=json list d5b5f971-91ec-4f56-ad41-9e48b6e91e2b \
+        varfish-cli case --output-format=json list {proj_uuid} \
         > {output}
         """
         )
@@ -145,7 +162,10 @@ rule wait_for_query:
                 "$query_id" \
             > {output}.tmp
 
-            if grep done {output}.tmp >/dev/null; then
+            if grep failed {output}.tmp >/dev/null; then
+                >&2 echo "Job failed!"
+                exit 1
+            elif grep done {output}.tmp >/dev/null; then
                 mv {output}.tmp {output}
                 break
             fi
@@ -184,6 +204,7 @@ def do_convert(inputf, outputf):
             row["reference"],
             row["alternative"],
             "|".join(row["refseq_effect"]),
+            ENTREZ_TO_SYMBOL.get(row["refseq_gene_id"], "."),
             row["refseq_gene_id"],
             row["refseq_transcript_id"],
         ]
