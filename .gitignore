@@ -8,6 +8,7 @@
 !workflow/rules/annotation/*
 !workflow/resources/*
 !config/*.example
+!data/entrez_to_symbol.tsv.gz
 !LICENSE
 !README.md
 !CHANGELOG.md
