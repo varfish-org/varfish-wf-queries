@@ -1,0 +1,8 @@
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - jq
+  - snakemake
+  - varfish-cli ==0.3.0
